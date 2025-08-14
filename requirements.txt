@@ -1,11 +1,23 @@
-# Milvus client
-pymilvus==2.5.12
+# Simplified requirements based on the Milvus Quickstart Guide
 
-# gRPC – matches pymilvus’s upper bound
-grpcio==1.67.1
-grpcio-status==1.67.1
+# Core Vector DB libraries
+pymilvus
+milvus-lite
 
-# PyTorch and torchaudio in sync
-torch==2.7.0
-torchaudio==2.7.0
-torchvision==0.22.0
+# Machine Learning & Embeddings
+torch
+sentence-transformers
+scikit-learn
+numpy
+neo4j
+semantic-chunking 
+langchain-experimental
+# sentence-transformers 
+# cross-encoder
+
+# Document Processing
+pypdf
+langchain-text-splitters
+
+# LLM Integration
+google-generativeai
