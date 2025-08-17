@@ -12,6 +12,7 @@ numpy
 neo4j
 semantic-chunking 
 langchain-experimental
+gemini
 # sentence-transformers 
 # cross-encoder
 
