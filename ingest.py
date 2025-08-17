@@ -1,7 +1,10 @@
 import pypdf
-from implementation import MilvusVectorStore
+import os
+import json
+import google.generativeai as genai
+from implementation import MilvusVectorStore, Neo4jGraphDatabase
 from sentence_transformers import SentenceTransformer
-# from neo4j import GraphDatabase
+from neo4j import GraphDatabase
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_community.embeddings import HuggingFaceEmbeddings 
@@ -33,6 +36,36 @@ def get_embeddings(chunks: list[str], model: SentenceTransformer) -> list[list[f
     print(f"generated {len(embeddings)} embeddings")
     return embeddings.tolist() 
 
+def extract_graph_triplets(text_chunk: str, llm):
+    # uses llm to extract triplets from chunks
+    prompt = f"""
+        From the text below, extract entities and relationships.
+        Format the output as a list of JSON objects with "head", "tail", "head_type", "tail_type", and "relation".
+        Entity types should be one of the following: [Company, Product, Technology, Person, Organization, Topic].
+
+        Example:
+        Text: "The NVIDIA GeForce RTX 4090 GPU uses the Ada Lovelace architecture."
+        Output: [
+            {{"head": "GeForce RTX 4090", "head_type": "Product", "relation": "USES_ARCHITECTURE", "tail": "Ada Lovelace", "tail_type": "Technology"}},
+            {{"head": "GeForce RTX 4090", "head_type": "Product", "relation": "IS_A", "tail": "GPU", "tail_type": "Topic"}}
+        ]
+
+        Provide only the JSON list.
+
+        Text to analyze:
+        ---
+        {text_chunk}
+        ---
+    """
+    try:
+        response = llm.generate_content(prompt)
+        # only json
+        json_str = response.text.strip().replace("```json", "").replace("```", "").strip()
+        return json.loads(json_str)
+    except (json.JSONDecodeError, AttributeError, ValueError) as e:
+        print(f"can't parse bc exception: {e}")
+        return [] 
+
 def main():
     PDF_FILE_PATH = "gpu.pdf"
     # CHUNK_SIZE = 1000
@@ -40,11 +73,25 @@ def main():
     EMBEDDING_MODEL = "all-MiniLM-L6-v2"
     COLLECTION_NAME = "my_document_store_v4"
 
+    URI_NEO4J = os.environ.get("URI_NEO4J")
+    USER_NEO4J = os.environ.get("USER_NEO4J")
+    PASSWORD_NEO4J = os.environ.get("PASSWORD_NEO4J")
+
+    # initialize model
+    genai.configure(api_key = os.environ["GEMINI_API_KEY"])
+    llm = genai.GenerativeModel('gemini-1.5-flash-latest')
+    embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+
+    # upsert to vector store and graph db
+
+    vector_store = MilvusVectorStore(embedding_dim=384, collection_name=COLLECTION_NAME)
+    graph_store = Neo4jGraphDatabase(URI_NEO4J, USER_NEO4J, PASSWORD_NEO4J)
+
+
     # extract text
     document_text = extract_text(PDF_FILE_PATH)
 
     # chunk text semantically 
-    embedding_model = SentenceTransformer(EMBEDDING_MODEL)
     text_chunks = chunk_text_semantic(document_text, EMBEDDING_MODEL)
 
     # embed
@@ -53,53 +100,33 @@ def main():
     # text_chunk = chunk_text_semantic(document_text, embedding_model)
     # chunk_embedding = get_embeddings(text_chunk, embedding_model)
 
-    # upsert to vector store
-    store = MilvusVectorStore(embedding_dim=384, collection_name=COLLECTION_NAME)
-    store.connect()
-
     # meta data for each chunk
     metadatas = [{"source": PDF_FILE_PATH, "text": chunk} for chunk in text_chunks]
+    vector_store.connect()
+    # upsert vector store 
+    vector_store.upsert(vectors=chunk_embeddings, texts=text_chunks, metadatas=metadatas)
+    vector_store.close()
+    print("completed vector store insertion\n")
 
-    # perform upsert
-    store.upsert(
-        vectors = chunk_embeddings, 
-        texts = text_chunks,
-        metadatas = metadatas, 
-    )
+    # ingest into neo4j
+    print("ingesting to graphdb")
+    total_triplets = 0
+    for i, chunk in enumerate(text_chunks):
+        print(f"processing chunk {i+1}/{len(text_chunks)} for extraction")
+        triplets = extract_graph_triplets(chunk, llm)
 
-    store.close()
+        if triplets:
+            graph_store.add_triplets(triplets)
+            total_triplets += len(triplets)
+            print(f"added {len(triplets)} triplets to the graph")
+
+        print(f"completed ingestion with a total of {total_triplets} triplets")
+
+
+    graph_store.close()
     print("\n Document has been ingested")
 
 if __name__ =="__main__":
     main()
 
 
-def extract_graph(text:str, llm):
-    """
-    Uses an LLM to extract knowledge graph triplets (head, relation, tail)
-    from a piece of text.
-    """
-    print("getting graph w llm")
-
-    prompt = ChatPromptTemplate("""
-        From the text below, extract entities and the relationships between them.
-        Format the output as a list of JSON objects, where each object has a 'head', 'relation', and 'tail'.
-        The 'head' and 'tail' are the entities, and 'relation' is the connection between them.
-
-        Example:
-        Text: "The NVIDIA GeForce RTX 4090 GPU uses the Ada Lovelace architecture."
-        Output: [
-            {{"head": "GeForce RTX 4090", "relation": "USES_ARCHITECTURE", "tail": "Ada Lovelace"}},
-            {{"head": "GeForce RTX 4090", "relation": "IS_A", "tail": "GPU"}}
-        ]
-
-        Do not add any preamble or explanation, just the JSON list.
-
-        Text to analyze:
-        {text_chunk}
-        """
-    )
-    
-    chain = prompt | llm
-
-    return chain.invoke({"text_chunk" : text})
