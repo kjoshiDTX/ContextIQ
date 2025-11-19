@@ -67,19 +67,22 @@ class MilvusVectorStore(VectorStoreInterface):
             for vec, txt, meta in zip(vectors, texts, metadatas)
         ]
         result = self.client.insert(entities)
-        self.client.flush()
+        # Removed flush() - Milvus will auto-flush periodically, or you can flush manually if needed
+        # self.client.flush()  # Uncomment if you need immediate persistence
         return result.primary_keys
     
-    def search(self, query_embedding, top_k, filter=None):
+    def search(self, query_embedding, top_k, filter_expr=None):
         results = self.client.search(
             data=[query_embedding],
             anns_field="embedding",
             param={"metric_type": "L2", "params": {"nprobe": 10}},
             limit=top_k,
-            expr=None,  # adapt for filter expressions
-            output_fields=["text", "metadata"]
+            # expr=None,  # adapt for filter expressions
+            expr=filter_expr,
+            output_fields=["text", "*"]
         )
-        return [(r.id, r.distance, {"text": r.entity.get("text"), **r.entity.get("metadata", {})}) for hit in results for r in hit]
+        return [(r.id, r.distance, r.entity.to_dict()['entity']) for hit in results for r in hit]
+    
     
     def delete(self, ids):
         self.client.delete(expr=f"id in {ids}")
@@ -129,26 +132,27 @@ class Neo4jGraphDatabase:
         with self._driver.session() as session:
             session.run(query, triplets=triplets)
 
-    def run_community_detection(self, graph_name: str = "context-iq", write_property: str = "communityId") -> dict:
+    def run_community_detection(self, graph_name: str = "contextiqGraph", write_property: str = "communityId") -> dict:
         """
-        Leiden community detection algo using neo4j GDS and writes community id back to nodes
+        Runs the Leiden community detection algorithm using GDS and writes the community ID back to the nodes.
         """
         with self._driver.session() as session:
-            # use entity and relationships to project the graph to gds memory catalog
-            send_query = f"""
+            # clean up existing graphs w same name 
+            session.run(f"CALL gds.graph.drop('{graph_name}', false)")
+
+            # project the graph
+            # FIX: Use '*' to automatically include ALL relationship types found in the DB.
+            # We skip the 'UNDIRECTED' config for simplicity; Leiden handles the default orientation fine.
+            project_query = f"""
                 CALL gds.graph.project(
                     '{graph_name}',
                     'Entity',
-                    {{
-                        RELATIONSHIP: {{
-                            orientation: 'UNDIRECTED'
-                        }}
-                    }}
+                    '*'
                 )
             """
-            session.run(send_query)
+            session.run(project_query)
 
-            # use leiden to write the results back
+            # run Leiden and write the results back
             leiden_query = f"""
                 CALL gds.leiden.write(
                     '{graph_name}',
@@ -160,12 +164,12 @@ class Neo4jGraphDatabase:
             """
             result = session.run(leiden_query)
             summary = result.single().data()
-
-            # clean the in memory projections
+            
+            # clean up the in memory graph
             drop_query = f"CALL gds.graph.drop('{graph_name}')"
             session.run(drop_query)
-
-            print(f"leiden complete. found {summary['communityCount']} communities.")
+            
+            print(f"GDS Leiden complete. Found {summary['communityCount']} communities.")
             return {"community_count": summary["communityCount"], "modularity": summary["modularity"]}
     
     def get_community_content(self, communityId: int, limit: int = 25) -> str:
@@ -185,3 +189,5 @@ class Neo4jGraphDatabase:
 
 
    
+
+
