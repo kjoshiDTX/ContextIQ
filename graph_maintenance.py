@@ -15,7 +15,7 @@ def summarize_and_embed_communities():
     USER_NEO4J = os.environ.get("USER_NEO4J")
     PASSWORD_NEO4J = os.environ.get("PASSWORD_NEO4J")
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    llm = genai.GenerativeModel('gemini-1.5-flash-latest')
+    llm = genai.GenerativeModel('gemini-2.5-flash')
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
     graph_store = Neo4jGraphDatabase(URI_NEO4J, USER_NEO4J, PASSWORD_NEO4J)
@@ -29,8 +29,9 @@ def summarize_and_embed_communities():
     graph_store.run_community_detection()
 
     # summarize and embed each community
-    community_ids_result = graph_store.execute_query
-    ("MATCH (n:Entity) WHERE n.communityId IS NOT NULL RETURN DISTINCT n.communityId as c_id ORDER BY c_id")
+    community_ids_result = graph_store.execute_query(
+        "MATCH (n:Entity) WHERE n.communityId IS NOT NULL RETURN DISTINCT n.communityId as c_id ORDER BY c_id"
+    )
 
     community_ids = [res["c_id"] for res in community_ids_result]
 

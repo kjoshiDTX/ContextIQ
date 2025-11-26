@@ -24,7 +24,7 @@ class MilvusVectorStore(VectorStoreInterface):
         
     def connect(self, **kwargs) -> None:
         # Milvus Lite will automatically start a server in the background
-        connections.connect(alias="default", uri="./milvus_local.db") 
+        connections.connect(alias="default", uri="./milvus_local2.db") 
         # self.client = Collection(self.collection_name)
         # 2. Check if the collection exists; if not, create it
         if not utility.has_collection(self.collection_name):
@@ -143,16 +143,23 @@ class Neo4jGraphDatabase:
             # project the graph
             # FIX: Use '*' to automatically include ALL relationship types found in the DB.
             # We skip the 'UNDIRECTED' config for simplicity; Leiden handles the default orientation fine.
+            print("Projecting graph into GDS memory...")
             project_query = f"""
                 CALL gds.graph.project(
                     '{graph_name}',
                     'Entity',
-                    '*'
+                    {{
+                        RELATIONSHIP: {{
+                            type: '*',
+                            orientation: 'UNDIRECTED'
+                        }}
+                    }}
                 )
             """
             session.run(project_query)
 
-            # run Leiden and write the results back
+            # run Leiden and write the results back 
+            print("running leiden")
             leiden_query = f"""
                 CALL gds.leiden.write(
                     '{graph_name}',
@@ -166,8 +173,8 @@ class Neo4jGraphDatabase:
             summary = result.single().data()
             
             # clean up the in memory graph
-            drop_query = f"CALL gds.graph.drop('{graph_name}')"
-            session.run(drop_query)
+            # drop_query = f"CALL gds.graph.drop('{graph_name}')"
+            session.run(f"CALL gds.graph.drop('{graph_name}', false)")
             
             print(f"GDS Leiden complete. Found {summary['communityCount']} communities.")
             return {"community_count": summary["communityCount"], "modularity": summary["modularity"]}

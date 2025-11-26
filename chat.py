@@ -41,10 +41,10 @@ def format_graph_results(records):
     for record in records:
         try:
             head = record["h"]["name"]
-            relation = record["r"]["type"]
+            relation = record["r"].type
             tail = record["t"]["name"]
-            formatted.append(f"Fact: ('{head}' -[{relation}]-> '{tail}')")
-        except(TypeError, KeyError):
+            formatted.append(f"Fact:'{head}' -[{relation}]-> '{tail}'  source: knowledge graph\n")
+        except(TypeError, KeyError) as e:
             continue
     return "".join(formatted)
 
@@ -123,21 +123,45 @@ def run_chat_interface(embedding_model, cross_encoder, vector_store, community_s
                 # updated query with community id
                 cypher_query = """
                     MATCH (h:Entity)-[r]-(t:Entity)
-                    WHERE h.communityId = $community_id AND h.name IN $entities
+                    WHERE h.communityId = $community_id 
+                    AND any(e IN $entities WHERE toLower(h.name) CONTAINS toLower(e) OR toLower(e) CONTAINS toLower(h.name))
                     RETURN h, r, t
                     LIMIT 10
-                    """
+                """
+                try:
+                    target_community_id = int(target_community_id)
+                except:
+                    pass
+
                 graph_results = graph_store.execute_query(
                     cypher_query, 
                     parameters={"entities": entities, "community_id" : target_community_id}
                 )
+                
+                if not graph_results:
+                    print(f"no results in community {target_community_id}. trying global search.")
+                    cypher_query = """
+                        MATCH (h:Entity)-[r]-(t:Entity)
+                        WHERE any(e IN $entities WHERE toLower(h.name) CONTAINS toLower(e) OR toLower(e) CONTAINS toLower(h.name))
+                        RETURN h, r, t
+                        LIMIT 10
+                    """
+                    graph_results = graph_store.execute_query(cypher_query, parameters={"entities": entities})
+
                 graph_context_str = format_graph_results(graph_results)
             elif entities:
                 print(f"found entities {entities}. community however was not found. global search")
                 # fallback to original query
-                cypher_query = "MATCH (h:Entity)-[r]-(t:Entity) WHERE h.name IN $entities RETURN h,r,t LIMIT 10"
+                cypher_query = """
+                    MATCH (h:Entity)-[r]-(t:Entity)
+                    WHERE any(e IN $entities WHERE toLower(h.name) CONTAINS toLower(e) OR toLower(e) CONTAINS toLower(h.name))
+                    RETURN h, r, t
+                    LIMIT 10
+                """
                 graph_results = graph_store.execute_query(cypher_query, parameters={"entities": entities})
                 graph_context_str = format_graph_results(graph_results)
+            
+            print(f"DEBUG: Graph Context: {graph_context_str}")
 
             print("generating answer")
             final_answer = getGeminiAnswer(question, rag_context, graph_context_str, llm)
@@ -194,7 +218,7 @@ def main():
     # Load models
     print("loading models...")
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    llm = genai.GenerativeModel('gemini-1.5-flash-latest')
+    llm = genai.GenerativeModel('gemini-2.5-flash')
     embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
     cross_encoder = CrossEncoder(CROSS_ENCODER_NAME)
 

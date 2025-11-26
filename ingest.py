@@ -1,13 +1,20 @@
-import pypdf
-import os
+# import pypdf
+# import os
 import json
-import google.generativeai as genai
-from implementation import MilvusVectorStore, Neo4jGraphDatabase
-from sentence_transformers import SentenceTransformer
-from neo4j import GraphDatabase
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_experimental.text_splitter import SemanticChunker
-from langchain_community.embeddings import HuggingFaceEmbeddings 
+# import google.generativeai as genai
+# from implementation import MilvusVectorStore, Neo4jGraphDatabase
+# from sentence_transformers import SentenceTransformer
+# from neo4j import GraphDatabase
+# from langchain_core.prompts import ChatPromptTemplate
+# from langchain_experimental.text_splitter import SemanticChunker
+print("starting import")
+import os
+print("import pypdf"); import pypdf
+print("import genai"); import google.generativeai as genai
+print("import implementation"); from implementation import MilvusVectorStore, Neo4jGraphDatabase
+print("import sentence_transformers"); from sentence_transformers import SentenceTransformer
+print("import semanticchunker"); from langchain_experimental.text_splitter import SemanticChunker
+#from langchain_community.embeddings import HuggingFaceEmbeddings 
 # from langchain_google_genai import ChatGoogleGenerativeAI
 
 def extract_text(pdf_path: str) -> str:
@@ -21,8 +28,19 @@ def extract_text(pdf_path: str) -> str:
 def chunk_text_semantic(text: str, embedding_model_name: str) -> list[str]:
     # split text so you have overlapping chunks
     print(f"chunking w semantic chunker: {embedding_model_name}")
-    embedding_function = HuggingFaceEmbeddings(model_name=embedding_model_name)
-    text_splitter = SemanticChunker(embedding_function)
+    ##################################################################
+    # embedding_function = HuggingFaceEmbeddings(model_name=embedding_model_name)
+    # text_splitter = SemanticChunker(embedding_function)
+    embedding_model = SentenceTransformer(embedding_model_name)
+
+    class Wrapper:
+        def embed_documents(self, docs):
+            return embedding_model.encode(docs).tolist()
+        def embed_query(self, doc):
+            return embedding_model.encode([doc])[0].tolist()
+
+    text_splitter = SemanticChunker(Wrapper())
+    ##################################################################
     chunks = text_splitter.split_text(text)
     # flat_chunks =  [item for sublist in chunks for item in sublist]
     # print(f"split text into {len(flat_chunks)} semantic chunks")
@@ -36,28 +54,42 @@ def get_embeddings(chunks: list[str], model: SentenceTransformer) -> list[list[f
     print(f"generated {len(embeddings)} embeddings")
     return embeddings.tolist() 
 
-def extract_graph_triplets(text_chunk: str, llm):
+def extract_graph_triplets(text_chunk: list[str], llm):
     # uses llm to extract triplets from chunks
+    formatted_chunks = ""
+    for i, chunk in enumerate(text_chunk):
+        formatted_chunks += f"\n-- chunk {i + 1} -- \n{chunk}\n"
     prompt = f"""
-        From the text below, extract entities and relationships.
-        Format the output as a list of JSON objects with "head", "tail", "head_type", "tail_type", and "relation".
-        Entity types should be one of the following: [Company, Product, Technology, Person, Organization, Topic].
+        From the text chunks below, extract entities and relationships.
+        Format the output as a single JSON list, where each object has "head", "tail", "head_type", "tail_type", "relation",
+        and a "source_chunk" number.
+        Entity types should be one of: [Company, Product, Technology, Person, Organization, Topic].
+        IMPORTANT: Entities must be specific proper nouns or distinct technical terms (e.g., "GeForce RTX 4090", "Ada Lovelace").
+        DO NOT extract generic terms, verbs, or adjectives as entities (e.g., "processing", "thousands", "powerful", "architecture", "generation").
+        Relationship types MUST be one of: [USES, PRODUCED_BY, HAS_PART, IS_A, RELATED_TO, COMPETES_WITH].
+        If the relationship does not fit any of these, use RELATED_TO.
 
         Example:
-        Text: "The NVIDIA GeForce RTX 4090 GPU uses the Ada Lovelace architecture."
+        Text:
+        --- CHUNK 1 ---
+        The NVIDIA GeForce RTX 4090 GPU uses the Ada Lovelace architecture.
+        --- CHUNK 2 ---
+        The RTX 4090 was released by NVIDIA.
+        
         Output: [
-            {{"head": "GeForce RTX 4090", "head_type": "Product", "relation": "USES_ARCHITECTURE", "tail": "Ada Lovelace", "tail_type": "Technology"}},
-            {{"head": "GeForce RTX 4090", "head_type": "Product", "relation": "IS_A", "tail": "GPU", "tail_type": "Topic"}}
+            {{"head": "GeForce RTX 4090", "head_type": "Product", "relation": "USES", "tail": "Ada Lovelace", "tail_type": "Technology", "source_chunk": 1}},
+            {{"head": "GeForce RTX 4090", "head_type": "Product", "relation": "PRODUCED_BY", "tail": "NVIDIA", "tail_type": "Company", "source_chunk": 2}}
         ]
 
-        Provide only the JSON list.
+        Provide only the single JSON list.
 
-        Text to analyze:
+        Text chunks to analyze:
         ---
-        {text_chunk}
+        {formatted_chunks}
         ---
     """
     try:
+        print("send batch request to llm")
         response = llm.generate_content(prompt)
         # only json
         json_str = response.text.strip().replace("```json", "").replace("```", "").strip()
@@ -79,7 +111,7 @@ def main():
 
     # initialize model
     genai.configure(api_key = os.environ["GEMINI_API_KEY"])
-    llm = genai.GenerativeModel('gemini-1.5-flash-latest')
+    llm = genai.GenerativeModel('gemini-2.5-flash')
     embedding_model = SentenceTransformer(EMBEDDING_MODEL)
 
     # upsert to vector store and graph db
@@ -92,12 +124,11 @@ def main():
     document_text = extract_text(PDF_FILE_PATH)
 
     # chunk text semantically 
-    text_chunks = chunk_text_semantic(document_text, EMBEDDING_MODEL)
+    text_chunks = chunk_text_semantic(document_text, EMBEDDING_MODEL)[:5]
 
     # embed
     print(f"loading embedding model '{EMBEDDING_MODEL}'")
     ################################################################################################### CHANGE FOR PROD #################################
-    text_chunks = text_chunks[:5]
     chunk_embeddings = get_embeddings(text_chunks, embedding_model)
     # text_chunk = chunk_text_semantic(document_text, embedding_model)
     # chunk_embedding = get_embeddings(text_chunk, embedding_model)
@@ -112,17 +143,22 @@ def main():
 
     # ingest into neo4j
     print("ingesting to graphdb")
-    total_triplets = 0
-    for i, chunk in enumerate(text_chunks):
-        print(f"processing chunk {i+1}/{len(text_chunks)} for extraction")
-        triplets = extract_graph_triplets(chunk, llm)
+    
+    # 1. Call the new batch function ONCE, outside any loops.
+    #    This sends all chunks to the LLM in a single API call.
+    print("Sending one large batch request to LLM for graph extraction...")
+    all_triplets = extract_graph_triplets(text_chunks, llm) 
+    
+    # 2. Add all triplets to the graph in ONE database transaction
+    if all_triplets:
+        graph_store.add_triplets(all_triplets)
+        total_triplets = len(all_triplets)
+        print(f"Successfully added {total_triplets} triplets to the graph in a single batch.")
+    else:
+        total_triplets = 0
+        print("No triplets were extracted from the batch.")
 
-        if triplets:
-            graph_store.add_triplets(triplets)
-            total_triplets += len(triplets)
-            print(f"added {len(triplets)} triplets to the graph")
-
-        print(f"completed ingestion with a total of {total_triplets} triplets")
+    print(f"completed ingestion with a total of {total_triplets} triplets")
 
 
     graph_store.close()
@@ -130,5 +166,3 @@ def main():
 
 if __name__ =="__main__":
     main()
-
-
