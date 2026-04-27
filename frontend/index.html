@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ContextIQ</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0d14;
+      --surface:   #13131c;
+      --card:      #1a1a26;
+      --border:    #252535;
+      --accent:    #6366f1;
+      --accent-h:  #818cf8;
+      --text:      #e8e8f0;
+      --muted:     #6b6b85;
+      --success:   #22c55e;
+      --warn:      #f59e0b;
+      --danger:    #ef4444;
+      --sidebar-w: 220px;
+      --radius:    10px;
+    }
+
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Layout ──────────────────────────────── */
+    #app { display: flex; height: 100vh; overflow: hidden; }
+
+    /* ── Sidebar ─────────────────────────────── */
+    #sidebar {
+      width: var(--sidebar-w); flex-shrink: 0;
+      background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 20px 0;
+    }
+    .logo { padding: 0 20px 24px; display: flex; align-items: center; gap: 10px; }
+    .logo-icon { width: 32px; height: 32px; background: var(--accent); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+    .logo-text { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; }
+    .logo-sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+    .user-box { margin: 0 12px 20px; }
+    .user-box label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; display: block; margin-bottom: 5px; padding-left: 4px; }
+    .user-box input { width: 100%; padding: 7px 10px; background: var(--card); border: 1px solid var(--border); border-radius: 7px; color: var(--text); font-size: 12px; outline: none; transition: border-color .2s; }
+    .user-box input:focus { border-color: var(--accent); }
+
+    nav { flex: 1; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 20px; cursor: pointer; color: var(--muted); transition: all .15s; border-left: 2px solid transparent; font-size: 13px; }
+    .nav-item:hover { color: var(--text); background: rgba(99,102,241,.07); }
+    .nav-item.active { color: var(--accent-h); background: rgba(99,102,241,.12); border-left-color: var(--accent); }
+    .nav-icon { font-size: 15px; width: 18px; text-align: center; }
+
+    .sidebar-footer { padding: 16px 20px; border-top: 1px solid var(--border); }
+    .health-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--success); margin-right: 6px; }
+    .health-dot.off { background: var(--danger); }
+
+    /* ── Main ────────────────────────────────── */
+    #main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+    .topbar { padding: 16px 28px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--surface); }
+    .topbar h1 { font-size: 16px; font-weight: 600; }
+    .topbar p { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    .section { display: none; flex: 1; overflow-y: auto; padding: 24px 28px; }
+    .section.active { display: flex; flex-direction: column; gap: 20px; }
+
+    /* ── Cards ───────────────────────────────── */
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .card-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 14px; }
+
+    /* ── Buttons ─────────────────────────────── */
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 7px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-h); }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+    .btn-danger { background: rgba(239,68,68,.15); color: var(--danger); border: 1px solid rgba(239,68,68,.3); }
+    .btn-danger:hover { background: rgba(239,68,68,.25); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ── Inputs ──────────────────────────────── */
+    input[type=text], input[type=date], textarea, select {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
+      color: var(--text); padding: 9px 12px; font-size: 13px; outline: none;
+      transition: border-color .2s; font-family: inherit; width: 100%;
+    }
+    input[type=text]:focus, input[type=date]:focus, textarea:focus, select:focus { border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
+
+    /* ── Query ───────────────────────────────── */
+    #chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; min-height: 200px; max-height: 400px; padding: 4px; }
+    .msg { display: flex; flex-direction: column; gap: 6px; }
+    .msg-user { align-items: flex-end; }
+    .msg-bubble { padding: 12px 16px; border-radius: 12px; line-height: 1.6; max-width: 85%; }
+    .msg-user .msg-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+    .msg-ai .msg-bubble { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 3px; white-space: pre-wrap; }
+    .msg-meta { font-size: 11px; color: var(--muted); padding: 0 4px; }
+    .sources-bar { display: flex; flex-wrap: wrap; gap: 6px; }
+    .source-chip { font-size: 11px; padding: 3px 9px; background: rgba(99,102,241,.15); border: 1px solid rgba(99,102,241,.3); border-radius: 20px; color: var(--accent-h); cursor: help; }
+    .graph-facts { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+    .graph-fact { font-size: 11px; color: var(--muted); padding: 4px 10px; background: rgba(99,102,241,.07); border-radius: 5px; border-left: 2px solid var(--accent); }
+    .query-input-row { display: flex; gap: 10px; }
+    .query-input-row input { flex: 1; }
+    .cached-badge { font-size: 10px; padding: 2px 7px; background: rgba(245,158,11,.15); border: 1px solid rgba(245,158,11,.3); border-radius: 20px; color: var(--warn); }
+
+    /* ── Upload ──────────────────────────────── */
+    #drop-zone {
+      border: 2px dashed var(--border); border-radius: var(--radius);
+      padding: 40px; text-align: center; cursor: pointer; transition: all .2s;
+    }
+    #drop-zone.hover { border-color: var(--accent); background: rgba(99,102,241,.07); }
+    #drop-zone .dz-icon { font-size: 32px; margin-bottom: 10px; }
+    #drop-zone p { color: var(--muted); font-size: 13px; }
+    #drop-zone strong { color: var(--text); }
+    #file-input { display: none; }
+
+    /* ── Table ───────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+
+    .badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+    .badge-todo { background: rgba(107,114,128,.2); color: #9ca3af; }
+    .badge-in_progress { background: rgba(245,158,11,.15); color: var(--warn); }
+    .badge-done { background: rgba(34,197,94,.15); color: var(--success); }
+    .badge-pending { background: rgba(245,158,11,.15); color: var(--warn); }
+    .badge-extracted { background: rgba(34,197,94,.15); color: var(--success); }
+    .badge-skipped { background: rgba(107,114,128,.2); color: #9ca3af; }
+    .badge-failed { background: rgba(239,68,68,.15); color: var(--danger); }
+
+    /* ── Graph ───────────────────────────────── */
+    #graph-section { overflow: hidden; }
+    #graph-container { flex: 1; position: relative; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; min-height: 500px; }
+    #graph-svg { width: 100%; height: 100%; }
+    .graph-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    #graph-tooltip {
+      position: absolute; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 14px; font-size: 12px; pointer-events: none;
+      opacity: 0; transition: opacity .15s; z-index: 10; max-width: 240px;
+    }
+    #graph-tooltip strong { display: block; margin-bottom: 4px; color: var(--text); }
+    #graph-tooltip span { color: var(--muted); }
+    .node-info-panel {
+      position: absolute; right: 16px; top: 16px; width: 220px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px; display: none;
+    }
+    .node-info-panel.show { display: block; }
+    .node-info-panel h4 { font-size: 13px; margin-bottom: 8px; }
+    .node-info-panel .type-tag { font-size: 10px; color: var(--muted); margin-bottom: 10px; }
+
+    /* ── Journal ─────────────────────────────── */
+    #journal-graph-container { height: 380px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; position: relative; }
+
+    /* ── Tasks ───────────────────────────────── */
+    .task-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .task-form .full { grid-column: 1 / -1; }
+    .task-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .task-row:last-child { border-bottom: none; }
+    .task-title { flex: 1; font-size: 13px; }
+    .task-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .task-due { font-size: 11px; color: var(--muted); }
+    select.status-select { width: auto; padding: 4px 8px; font-size: 12px; }
+
+    /* ── Categories ──────────────────────────── */
+    .cat-form { display: flex; gap: 10px; align-items: flex-end; }
+    .cat-form > * { flex: 1; }
+    input[type=color] { height: 38px; padding: 2px 4px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+    .cat-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 20px; background: var(--card); border: 1px solid var(--border); font-size: 12px; }
+    .cat-dot { width: 9px; height: 9px; border-radius: 50%; }
+
+    /* ── Toast ───────────────────────────────── */
+    #toast-container { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; }
+    .toast { padding: 12px 16px; border-radius: 8px; font-size: 13px; max-width: 320px; animation: slideIn .2s ease; border: 1px solid var(--border); backdrop-filter: blur(10px); }
+    .toast-success { background: rgba(22,163,74,.2); border-color: rgba(34,197,94,.3); color: var(--success); }
+    .toast-error   { background: rgba(220,38,38,.2); border-color: rgba(239,68,68,.3); color: var(--danger); }
+    .toast-info    { background: rgba(99,102,241,.2); border-color: rgba(99,102,241,.3); color: var(--accent-h); }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+    /* ── Spinner ─────────────────────────────── */
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.2); border-top-color: #fff; border-radius: 50%; animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Scrollbar ───────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── Misc ────────────────────────────────── */
+    .empty { text-align: center; color: var(--muted); padding: 32px; font-size: 13px; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .col { display: flex; flex-direction: column; gap: 10px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Sidebar ───────────────────────────── -->
+  <div id="sidebar">
+    <div class="logo">
+      <div class="logo-icon">⬡</div>
+      <div>
+        <div class="logo-text">ContextIQ</div>
+        <div class="logo-sub">Knowledge Graph RAG</div>
+      </div>
+    </div>
+
+    <div class="user-box">
+      <label>User ID</label>
+      <input id="user-id-input" type="text" placeholder="demo-user" />
+    </div>
+
+    <nav>
+      <div class="nav-item active" data-section="query">
+        <span class="nav-icon">💬</span> Query
+      </div>
+      <div class="nav-item" data-section="documents">
+        <span class="nav-icon">📄</span> Documents
+      </div>
+      <div class="nav-item" data-section="graph">
+        <span class="nav-icon">🕸️</span> Knowledge Graph
+      </div>
+      <div class="nav-item" data-section="journal">
+        <span class="nav-icon">📓</span> Journal
+      </div>
+      <div class="nav-item" data-section="tasks">
+        <span class="nav-icon">✅</span> Tasks
+      </div>
+      <div class="nav-item" data-section="categories">
+        <span class="nav-icon">🏷️</span> Categories
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <span class="health-dot" id="health-dot"></span>
+      <span id="health-text" style="font-size:12px;color:var(--muted)">Connecting…</span>
+    </div>
+  </div>
+
+  <!-- ── Main ──────────────────────────────── -->
+  <div id="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <div>
+        <h1 id="topbar-title">Query</h1>
+        <p id="topbar-desc">Ask questions across your documents and knowledge graph</p>
+      </div>
+    </div>
+
+    <!-- ── Query Section ───────────────────── -->
+    <div class="section active" id="section-query">
+      <div class="card col" style="flex:1">
+        <div class="card-title">Conversation</div>
+        <div id="chat-messages">
+          <div class="msg msg-ai">
+            <div class="msg-bubble">👋 Hello! Upload some documents, then ask me anything about them. I'll use vector search + your knowledge graph to find the best answer.</div>
+            <div class="msg-meta">ContextIQ</div>
+          </div>
+        </div>
+        <hr />
+        <div class="query-input-row">
+          <input type="text" id="query-input" placeholder="Ask a question about your documents…" />
+          <button class="btn btn-primary" id="query-btn" onclick="sendQuery()">Ask</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Documents Section ──────────────── -->
+    <div class="section" id="section-documents">
+      <div class="card">
+        <div class="card-title">Upload Document</div>
+        <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+          <div class="dz-icon">📂</div>
+          <p><strong>Click to upload</strong> or drag and drop</p>
+          <p style="margin-top:6px">PDF, DOCX, TXT supported</p>
+        </div>
+        <input type="file" id="file-input" accept=".pdf,.docx,.txt" />
+        <div id="upload-category-row" class="row" style="margin-top:12px">
+          <select id="upload-category" style="flex:1">
+            <option value="">No category</option>
+          </select>
+          <div id="upload-status"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          Documents
+          <button class="btn btn-ghost btn-sm" onclick="loadDocuments()">↻ Refresh</button>
+        </div>
+        <div id="documents-list"><div class="empty">No documents yet</div></div>
+      </div>
+    </div>
+
+    <!-- ── Graph Section ──────────────────── -->
+    <div class="section" id="section-graph" style="gap:14px">
+      <div class="graph-toolbar">
+        <button class="btn btn-primary" onclick="loadGraph()">↻ Reload Graph</button>
+        <button class="btn btn-ghost" id="community-btn" onclick="detectCommunities()">🔍 Detect Communities</button>
+        <input type="range" id="graph-limit" min="10" max="200" value="60" style="width:120px" title="Node limit" />
+        <span style="color:var(--muted);font-size:12px" id="graph-limit-label">60 nodes</span>
+      </div>
+      <div id="graph-container">
+        <svg id="graph-svg"></svg>
+        <div id="graph-tooltip"></div>
+        <div class="node-info-panel" id="node-panel">
+          <h4 id="node-panel-name"></h4>
+          <div class="type-tag" id="node-panel-type"></div>
+          <textarea id="node-context-input" placeholder="Add notes about this node…" style="font-size:12px;min-height:60px"></textarea>
+          <button class="btn btn-primary btn-sm" style="margin-top:8px;width:100%" onclick="saveNodeContext()">Save Note</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Journal Section ────────────────── -->
+    <div class="section" id="section-journal">
+      <div class="grid2">
+        <div class="card col">
+          <div class="card-title">New Entry</div>
+          <input type="text" id="journal-title" placeholder="Title (optional)" />
+          <textarea id="journal-content" placeholder="Write your journal entry…" style="min-height:160px"></textarea>
+          <button class="btn btn-primary" onclick="createJournalEntry()">Save Entry</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            Journal Graph
+            <button class="btn btn-ghost btn-sm" onclick="loadJournalGraph()">↻ Refresh</button>
+          </div>
+          <div id="journal-graph-container">
+            <svg id="journal-graph-svg" style="width:100%;height:100%"></svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          Entries
+          <button class="btn btn-ghost btn-sm" onclick="loadJournalEntries()">↻ Refresh</button>
+        </div>
+        <div id="journal-list"><div class="empty">No entries yet</div></div>
+      </div>
+    </div>
+
+    <!-- ── Tasks Section ──────────────────── -->
+    <div class="section" id="section-tasks">
+      <div class="card">
+        <div class="card-title">New Task</div>
+        <div class="task-form">
+          <input type="text" id="task-title" placeholder="Task title" class="full" />
+          <input type="text" id="task-desc" placeholder="Description (optional)" class="full" />
+          <div>
+            <label style="font-size:11px;color:var(--muted);margin-bottom:5px;display:block">Status</label>
+            <select id="task-status">
+              <option value="todo">To Do</option>
+              <option value="in_progress">In Progress</option>
+              <option value="done">Done</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--muted);margin-bottom:5px;display:block">Due Date</label>
+            <input type="date" id="task-due" />
+          </div>
+          <button class="btn btn-primary full" onclick="createTask()">Add Task</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          Tasks
+          <button class="btn btn-ghost btn-sm" onclick="loadTasks()">↻ Refresh</button>
+        </div>
+        <div id="tasks-list"><div class="empty">No tasks yet</div></div>
+      </div>
+    </div>
+
+    <!-- ── Categories Section ─────────────── -->
+    <div class="section" id="section-categories">
+      <div class="card">
+        <div class="card-title">New Category</div>
+        <div class="cat-form">
+          <input type="text" id="cat-name" placeholder="Category name" />
+          <div style="flex:0 0 auto">
+            <label style="font-size:11px;color:var(--muted);margin-bottom:5px;display:block">Color</label>
+            <input type="color" id="cat-color" value="#6366f1" />
+          </div>
+          <button class="btn btn-primary" style="flex:0 0 auto;align-self:flex-end" onclick="createCategory()">Add</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+          Categories
+          <button class="btn btn-ghost btn-sm" onclick="loadCategories()">↻ Refresh</button>
+        </div>
+        <div id="categories-list"><div class="empty">No categories yet</div></div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<div id="toast-container"></div>
+
+<script>
+const API = 'http://localhost:8000/api';
+let selectedNode = null;
+let graphData = { nodes: [], links: [] };
+let journalGraphData = { nodes: [], links: [] };
+
+// ── User ID ───────────────────────────────────
+const userInput = document.getElementById('user-id-input');
+userInput.value = localStorage.getItem('ciq-user') || 'demo-user';
+userInput.addEventListener('input', () => localStorage.setItem('ciq-user', userInput.value));
+const uid = () => userInput.value.trim() || 'demo-user';
+
+// ── Navigation ─────────────────────────────────
+const topbarMeta = {
+  query:      ['Query', 'Ask questions across your documents and knowledge graph'],
+  documents:  ['Documents', 'Upload and manage your document library'],
+  graph:      ['Knowledge Graph', 'Visualize entity relationships extracted from your documents'],
+  journal:    ['Journal', 'Write personal notes and build your thought graph'],
+  tasks:      ['Tasks', 'Track your to-dos and get AI context in queries'],
+  categories: ['Categories', 'Organize documents into labeled groups'],
+};
+
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    const sec = item.dataset.section;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    item.classList.add('active');
+    document.getElementById(`section-${sec}`).classList.add('active');
+    document.getElementById('topbar-title').textContent = topbarMeta[sec][0];
+    document.getElementById('topbar-desc').textContent = topbarMeta[sec][1];
+    if (sec === 'documents') { loadDocuments(); loadCategories(); }
+    if (sec === 'graph') loadGraph();
+    if (sec === 'journal') { loadJournalEntries(); loadJournalGraph(); }
+    if (sec === 'tasks') loadTasks();
+    if (sec === 'categories') loadCategories();
+  });
+});
+
+// ── Health check ───────────────────────────────
+async function checkHealth() {
+  try {
+    const r = await fetch('http://localhost:8000/health');
+    const dot = document.getElementById('health-dot');
+    const txt = document.getElementById('health-text');
+    if (r.ok) { dot.className = 'health-dot'; txt.textContent = 'API connected'; }
+    else       { dot.className = 'health-dot off'; txt.textContent = 'API error'; }
+  } catch {
+    document.getElementById('health-dot').className = 'health-dot off';
+    document.getElementById('health-text').textContent = 'API offline';
+  }
+}
+checkHealth(); setInterval(checkHealth, 15000);
+
+// ── Toast ──────────────────────────────────────
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── Query ──────────────────────────────────────
+document.getElementById('query-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuery(); }
+});
+
+async function sendQuery() {
+  const input = document.getElementById('query-input');
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = '';
+
+  const btn = document.getElementById('query-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+
+  appendMessage('user', q);
+  const thinkingId = appendThinking();
+
+  try {
+    const res = await fetch(`${API}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q, user_id: uid() }),
+    });
+    const data = await res.json();
+    removeThinking(thinkingId);
+    appendAIMessage(data);
+  } catch (e) {
+    removeThinking(thinkingId);
+    appendMessage('ai', '⚠️ Failed to get a response. Is the backend running?');
+    toast('Query failed', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ask';
+  }
+}
+
+function appendMessage(role, text) {
+  const msgs = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = `msg msg-${role === 'user' ? 'user' : 'ai'}`;
+  div.innerHTML = `
+    <div class="msg-bubble">${escHtml(text)}</div>
+    <div class="msg-meta">${role === 'user' ? uid() : 'ContextIQ'}</div>
+  `;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+function appendAIMessage(data) {
+  const msgs = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'msg msg-ai';
+
+  const cachedBadge = data.cached ? '<span class="cached-badge">⚡ cached</span>' : '';
+  const sources = (data.sources || []).map(s =>
+    `<span class="source-chip" title="${escHtml(s.content_preview)}">${escHtml(s.document_id.slice(0,8))}… (${(s.similarity * 100).toFixed(0)}%)</span>`
+  ).join('');
+  const facts = (data.graph_context || []).map(f =>
+    `<div class="graph-fact">${escHtml(f.head)} <span style="color:var(--accent)">—[${escHtml(f.relation)}]→</span> ${escHtml(f.tail)}</div>`
+  ).join('');
+
+  div.innerHTML = `
+    <div class="msg-bubble" style="white-space:pre-wrap">${escHtml(data.answer)}</div>
+    ${sources ? `<div class="sources-bar">${cachedBadge}${sources}</div>` : ''}
+    ${facts ? `<div class="graph-facts">${facts}</div>` : ''}
+    <div class="msg-meta">ContextIQ${data.cached ? ' · from cache' : ''}</div>
+  `;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+let _thinkId = 0;
+function appendThinking() {
+  const id = ++_thinkId;
+  const msgs = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.id = `thinking-${id}`;
+  div.className = 'msg msg-ai';
+  div.innerHTML = `<div class="msg-bubble" style="color:var(--muted)"><span class="spinner"></span> Thinking…</div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return id;
+}
+function removeThinking(id) {
+  document.getElementById(`thinking-${id}`)?.remove();
+}
+
+// ── Documents ──────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('hover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('hover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('hover');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadFile(file);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) uploadFile(fileInput.files[0]); });
+
+async function uploadFile(file) {
+  const status = document.getElementById('upload-status');
+  status.innerHTML = '<span class="spinner"></span> Uploading…';
+
+  const form = new FormData();
+  form.append('file', file);
+  form.append('user_id', uid());
+  const catId = document.getElementById('upload-category').value;
+  if (catId) form.append('category_id', catId);
+
+  try {
+    const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+    status.innerHTML = '';
+    toast(`✓ "${file.name}" ingested — ${data.chunks_created} chunks, ${data.triplets_extracted} triplets`, 'success');
+    fileInput.value = '';
+    loadDocuments();
+  } catch (e) {
+    status.innerHTML = '';
+    toast(e.message, 'error');
+  }
+}
+
+async function loadDocuments() {
+  const el = document.getElementById('documents-list');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+  try {
+    const res = await fetch(`${API}/documents?user_id=${uid()}`);
+    const data = await res.json();
+    const docs = data.documents || [];
+    if (!docs.length) { el.innerHTML = '<div class="empty">No documents yet. Upload one above.</div>'; return; }
+    el.innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Filename</th><th>Type</th><th>Chunks</th><th>Added</th><th></th>
+        </tr></thead>
+        <tbody>${docs.map(d => `
+          <tr>
+            <td>${escHtml(d.filename)}</td>
+            <td><span class="badge badge-pending" style="background:rgba(99,102,241,.15);color:var(--accent-h)">${d.file_type}</span></td>
+            <td>${d.chunk_count}</td>
+            <td>${fmtDate(d.added_at)}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteDocument('${d.id}')">Delete</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch { el.innerHTML = '<div class="empty">Failed to load documents</div>'; }
+}
+
+async function deleteDocument(id) {
+  if (!confirm('Remove this document from your library?')) return;
+  try {
+    await fetch(`${API}/documents/${id}?user_id=${uid()}`, { method: 'DELETE' });
+    toast('Document removed', 'success');
+    loadDocuments();
+  } catch { toast('Delete failed', 'error'); }
+}
+
+// ── Knowledge Graph ────────────────────────────
+document.getElementById('graph-limit').addEventListener('input', function() {
+  document.getElementById('graph-limit-label').textContent = `${this.value} nodes`;
+});
+
+async function loadGraph() {
+  const limit = document.getElementById('graph-limit').value;
+  try {
+    const res = await fetch(`${API}/graph?limit=${limit}`);
+    graphData = await res.json();
+    renderGraph(graphData, 'graph-svg', 'graph-tooltip', onGraphNodeClick);
+    toast(`Graph loaded: ${graphData.nodes?.length || 0} nodes`, 'info');
+  } catch { toast('Failed to load graph', 'error'); }
+}
+
+async function detectCommunities() {
+  const btn = document.getElementById('community-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Running…';
+  try {
+    const res = await fetch(`${API}/graph/detect-communities`, { method: 'POST' });
+    const data = await res.json();
+    toast(`Communities detected: ${data.communities_found || '?'} groups`, 'success');
+    loadGraph();
+  } catch { toast('Community detection failed', 'error'); }
+  finally { btn.disabled = false; btn.textContent = '🔍 Detect Communities'; }
+}
+
+function onGraphNodeClick(node) {
+  selectedNode = node;
+  const panel = document.getElementById('node-panel');
+  document.getElementById('node-panel-name').textContent = node.name || node.id;
+  document.getElementById('node-panel-type').textContent = `Type: ${node.type || '?'} · Community: ${node.community ?? '—'}`;
+  document.getElementById('node-context-input').value = node.user_context || '';
+  panel.classList.add('show');
+}
+
+async function saveNodeContext() {
+  if (!selectedNode) return;
+  const context = document.getElementById('node-context-input').value;
+  try {
+    await fetch(`${API}/graph/node-context`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_name: selectedNode.name || selectedNode.id, context, user_id: uid() }),
+    });
+    toast('Note saved', 'success');
+  } catch { toast('Save failed', 'error'); }
+}
+
+// ── Graph renderer (shared by both graphs) ─────
+function renderGraph(data, svgId, tooltipId, onNodeClick) {
+  const svg = document.getElementById(svgId);
+  const container = svg.parentElement;
+  const W = container.clientWidth || 800;
+  const H = container.clientHeight || 500;
+
+  d3.select(svg).selectAll('*').remove();
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  const nodes = (data.nodes || []).map(d => ({ ...d }));
+  const links = (data.links || []).map(d => ({ ...d }));
+  if (!nodes.length) return;
+
+  const colorScale = d3.scaleOrdinal(d3.schemeTableau10);
+  const getColor = n => {
+    if (n.source === 'journal') return '#f59e0b';
+    if (n.community != null) return colorScale(n.community);
+    return colorScale(n.type || 'default');
+  };
+
+  const g = d3.select(svg).append('g');
+
+  // Zoom
+  d3.select(svg).call(d3.zoom().scaleExtent([.1, 4]).on('zoom', e => g.attr('transform', e.transform)));
+
+  // Simulation
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(80))
+    .force('charge', d3.forceManyBody().strength(-180))
+    .force('center', d3.forceCenter(W / 2, H / 2))
+    .force('collide', d3.forceCollide(22));
+
+  // Links
+  const link = g.append('g').selectAll('line').data(links).join('line')
+    .attr('stroke', '#2a2a3a').attr('stroke-width', 1.5).attr('stroke-opacity', .6);
+
+  // Link labels
+  const linkLabel = g.append('g').selectAll('text').data(links).join('text')
+    .attr('fill', '#6b6b85').attr('font-size', 9).attr('text-anchor', 'middle');
+
+  // Nodes
+  const node = g.append('g').selectAll('circle').data(nodes).join('circle')
+    .attr('r', d => 6 + Math.min((d.degree || 1) * 1.5, 14))
+    .attr('fill', d => getColor(d))
+    .attr('stroke', '#0d0d14').attr('stroke-width', 2)
+    .style('cursor', 'pointer')
+    .call(d3.drag()
+      .on('start', (e, d) => { if (!e.active) sim.alphaTarget(.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+  // Node labels
+  const label = g.append('g').selectAll('text').data(nodes).join('text')
+    .text(d => (d.name || d.id || '').slice(0, 18))
+    .attr('fill', '#e8e8f0').attr('font-size', 10).attr('text-anchor', 'middle')
+    .attr('dy', d => -(7 + Math.min((d.degree || 1) * 1.5, 14)))
+    .style('pointer-events', 'none').style('user-select', 'none');
+
+  // Tooltip
+  const tip = document.getElementById(tooltipId);
+  node.on('mouseover', (e, d) => {
+    tip.style.opacity = '1';
+    tip.innerHTML = `<strong>${escHtml(d.name || d.id)}</strong><span>Type: ${d.type || '?'}<br>Community: ${d.community ?? '—'}<br>Degree: ${d.degree ?? '?'}</span>`;
+  }).on('mousemove', e => {
+    const rect = svg.getBoundingClientRect();
+    tip.style.left = (e.clientX - rect.left + 12) + 'px';
+    tip.style.top  = (e.clientY - rect.top  + 12) + 'px';
+  }).on('mouseout', () => { tip.style.opacity = '0'; });
+
+  if (onNodeClick) node.on('click', (e, d) => onNodeClick(d));
+
+  sim.on('tick', () => {
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    linkLabel.attr('x', d => (d.source.x + d.target.x) / 2).attr('y', d => (d.source.y + d.target.y) / 2)
+      .text(d => d.relation || d.type || '');
+    node.attr('cx', d => d.x).attr('cy', d => d.y);
+    label.attr('x', d => d.x).attr('y', d => d.y);
+  });
+}
+
+// ── Journal ────────────────────────────────────
+async function createJournalEntry() {
+  const content = document.getElementById('journal-content').value.trim();
+  if (!content) { toast('Write something first', 'error'); return; }
+  const title = document.getElementById('journal-title').value.trim();
+  try {
+    await fetch(`${API}/journal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: uid(), content, title: title || undefined }),
+    });
+    document.getElementById('journal-content').value = '';
+    document.getElementById('journal-title').value = '';
+    toast('Entry saved — extracting concepts in background', 'success');
+    loadJournalEntries();
+    setTimeout(loadJournalGraph, 3000);
+  } catch { toast('Failed to save entry', 'error'); }
+}
+
+async function loadJournalEntries() {
+  const el = document.getElementById('journal-list');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+  try {
+    const res = await fetch(`${API}/journal?user_id=${uid()}`);
+    const data = await res.json();
+    const entries = data.entries || [];
+    if (!entries.length) { el.innerHTML = '<div class="empty">No entries yet</div>'; return; }
+    el.innerHTML = `<table>
+      <thead><tr><th>Title / Preview</th><th>Status</th><th>Concepts</th><th>Date</th><th></th></tr></thead>
+      <tbody>${entries.map(e => `
+        <tr>
+          <td>
+            <div style="font-weight:500">${escHtml(e.title || e.content.slice(0,60))}${e.title && e.content.length > 60 ? '' : '…'}</div>
+            ${e.title ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${escHtml(e.content.slice(0,60))}…</div>` : ''}
+          </td>
+          <td><span class="badge badge-${e.extraction_status}">${e.extraction_status}</span>
+              ${e.skip_reason ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${e.skip_reason}</div>` : ''}
+          </td>
+          <td>${e.concept_count || 0}</td>
+          <td>${fmtDate(e.created_at)}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteJournalEntry('${e.id}')">Delete</button></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  } catch { el.innerHTML = '<div class="empty">Failed to load entries</div>'; }
+}
+
+async function deleteJournalEntry(id) {
+  if (!confirm('Delete this journal entry?')) return;
+  try {
+    await fetch(`${API}/journal/${id}?user_id=${uid()}`, { method: 'DELETE' });
+    toast('Entry deleted', 'success');
+    loadJournalEntries();
+    loadJournalGraph();
+  } catch { toast('Delete failed', 'error'); }
+}
+
+async function loadJournalGraph() {
+  try {
+    const res = await fetch(`${API}/journal/graph?user_id=${uid()}`);
+    journalGraphData = await res.json();
+    renderGraph(journalGraphData, 'journal-graph-svg', 'graph-tooltip', null);
+  } catch {}
+}
+
+// ── Tasks ──────────────────────────────────────
+async function createTask() {
+  const title = document.getElementById('task-title').value.trim();
+  if (!title) { toast('Title required', 'error'); return; }
+  try {
+    await fetch(`${API}/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: uid(),
+        title,
+        description: document.getElementById('task-desc').value.trim() || undefined,
+        status: document.getElementById('task-status').value,
+        due_date: document.getElementById('task-due').value || undefined,
+      }),
+    });
+    document.getElementById('task-title').value = '';
+    document.getElementById('task-desc').value = '';
+    document.getElementById('task-due').value = '';
+    toast('Task created', 'success');
+    loadTasks();
+  } catch { toast('Failed to create task', 'error'); }
+}
+
+async function loadTasks() {
+  const el = document.getElementById('tasks-list');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+  try {
+    const res = await fetch(`${API}/tasks?user_id=${uid()}`);
+    const data = await res.json();
+    const tasks = data.tasks || [];
+    if (!tasks.length) { el.innerHTML = '<div class="empty">No tasks yet</div>'; return; }
+    el.innerHTML = tasks.map(t => `
+      <div class="task-row">
+        <div style="flex:1">
+          <div class="task-title">${escHtml(t.title)}</div>
+          ${t.description ? `<div class="task-desc">${escHtml(t.description)}</div>` : ''}
+          ${t.due_date ? `<div class="task-due">Due: ${fmtDate(t.due_date)}</div>` : ''}
+        </div>
+        <select class="status-select" onchange="updateTaskStatus('${t.id}', this.value)">
+          <option value="todo" ${t.status==='todo'?'selected':''}>To Do</option>
+          <option value="in_progress" ${t.status==='in_progress'?'selected':''}>In Progress</option>
+          <option value="done" ${t.status==='done'?'selected':''}>Done</option>
+        </select>
+        <span class="badge badge-${t.status}">${t.status.replace('_',' ')}</span>
+        <button class="btn btn-danger btn-sm" onclick="deleteTask('${t.id}')">✕</button>
+      </div>`).join('');
+  } catch { el.innerHTML = '<div class="empty">Failed to load tasks</div>'; }
+}
+
+async function updateTaskStatus(id, status) {
+  try {
+    await fetch(`${API}/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    toast('Status updated', 'success');
+    loadTasks();
+  } catch { toast('Update failed', 'error'); }
+}
+
+async function deleteTask(id) {
+  try {
+    await fetch(`${API}/tasks/${id}`, { method: 'DELETE' });
+    toast('Task deleted', 'success');
+    loadTasks();
+  } catch { toast('Delete failed', 'error'); }
+}
+
+// ── Categories ─────────────────────────────────
+async function createCategory() {
+  const name = document.getElementById('cat-name').value.trim();
+  if (!name) { toast('Name required', 'error'); return; }
+  const color = document.getElementById('cat-color').value;
+  try {
+    await fetch(`${API}/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: uid(), name, color }),
+    });
+    document.getElementById('cat-name').value = '';
+    toast('Category created', 'success');
+    loadCategories();
+  } catch { toast('Failed to create category', 'error'); }
+}
+
+async function loadCategories() {
+  const el = document.getElementById('categories-list');
+  try {
+    const res = await fetch(`${API}/categories?user_id=${uid()}`);
+    const data = await res.json();
+    const cats = data.categories || [];
+
+    // Populate upload dropdown
+    const sel = document.getElementById('upload-category');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">No category</option>' +
+      cats.map(c => `<option value="${c.id}" ${c.id===current?'selected':''}>${escHtml(c.name)}</option>`).join('');
+
+    if (!el) return;
+    if (!cats.length) { el.innerHTML = '<div class="empty">No categories yet</div>'; return; }
+    el.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:10px;padding:4px">
+      ${cats.map(c => `
+        <div class="cat-chip">
+          <span class="cat-dot" style="background:${c.color}"></span>
+          ${escHtml(c.name)}
+          <button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:11px" onclick="deleteCategory('${c.id}')">✕</button>
+        </div>`).join('')}
+    </div>`;
+  } catch {}
+}
+
+async function deleteCategory(id) {
+  try {
+    await fetch(`${API}/categories/${id}`, { method: 'DELETE' });
+    toast('Category deleted', 'success');
+    loadCategories();
+  } catch { toast('Delete failed', 'error'); }
+}
+
+// ── Helpers ────────────────────────────────────
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDate(s) {
+  if (!s) return '—';
+  return new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+</script>
+</body>
+</html>
